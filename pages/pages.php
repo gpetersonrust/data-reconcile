@@ -1,7 +1,4 @@
 <?php
- 
-
- 
  class DataReconcile {
     public function __construct() {
         add_action('admin_menu', array($this, 'add_admin_page'));
