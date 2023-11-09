@@ -5,6 +5,7 @@
  class DataReconcile {
     public function __construct() {
         add_action('admin_menu', array($this, 'add_admin_page'));
+        $this->wpdb = $GLOBALS['wpdb'];
     }
 
     public function add_admin_page() {
@@ -92,8 +93,8 @@
         } else {
             echo json_encode(array('message' => 'No results found'));
         }
-        if ($wpdb->last_error) {
-            echo 'Database Error: ' . $wpdb->last_error;
+        if ($this->wpdb->last_error) {
+            echo 'Database Error: ' . $this->wpdb->last_error;
         }
     }
 
@@ -149,7 +150,7 @@
     }
 
     public function retrieve_and_download_data( ) {
-        global $wpdb;
+      
         $date = get_option('moxcar_post_retrieval_date');
         $post_types = get_option('moxcar_post_retrieval_posts', array());
         
@@ -160,7 +161,7 @@
         $query_args = array_merge($post_types, array($date));
         $in_clause = '(' . $post_type_placeholders . ')';
         
-        $query = $wpdb->prepare(
+        $query = $this->wpdb->prepare(
             "SELECT post_data.post_data, meta_data.meta_data, grouped_taxonomies.grouped_taxonomies
             FROM (
                 SELECT p.ID, JSON_OBJECT(
@@ -172,7 +173,7 @@
                     'post_date', p.post_date,
                     'post_modified', p.post_modified
                 ) AS post_data
-                FROM {$wpdb->prefix}posts AS p
+                FROM {$this->wpdb->prefix}posts AS p
                 WHERE p.post_type IN  ('$post_types_str')
                 AND  p.post_modified > %s
             ) AS post_data
@@ -180,24 +181,24 @@
                 SELECT pm.post_id, JSON_OBJECTAGG(
                     CASE WHEN pm.meta_key IS NOT NULL THEN pm.meta_key ELSE 'undefined' END, pm.meta_value
                 ) AS meta_data
-                FROM {$wpdb->prefix}postmeta AS pm
+                FROM {$this->wpdb->prefix}postmeta AS pm
                 GROUP BY pm.post_id
             ) AS meta_data ON post_data.ID = meta_data.post_id
             LEFT JOIN (
                 SELECT p.ID, JSON_ARRAYAGG(
                     JSON_OBJECT('taxonomy', tt.taxonomy, 'name', t.name)
                 ) AS grouped_taxonomies
-                FROM {$wpdb->prefix}posts AS p
-                LEFT JOIN {$wpdb->prefix}term_relationships AS tr ON p.ID = tr.object_id
-                LEFT JOIN {$wpdb->prefix}term_taxonomy AS tt ON tr.term_taxonomy_id = tt.term_taxonomy_id
-                LEFT JOIN {$wpdb->prefix}terms AS t ON tt.term_id = t.term_id
+                FROM {$this->wpdb->prefix}posts AS p
+                LEFT JOIN {$this->wpdb->prefix}term_relationships AS tr ON p.ID = tr.object_id
+                LEFT JOIN {$this->wpdb->prefix}term_taxonomy AS tt ON tr.term_taxonomy_id = tt.term_taxonomy_id
+                LEFT JOIN {$this->wpdb->prefix}terms AS t ON tt.term_id = t.term_id
                 WHERE p.post_type IN  ('$post_types_str')
                 GROUP BY p.ID
             ) AS grouped_taxonomies ON post_data.ID = grouped_taxonomies.ID",
             $date
         );
 
-        $results = $wpdb->get_results($query, ARRAY_A);
+        $results = $this->wpdb->get_results($query, ARRAY_A);
 
         return $results;
     }
