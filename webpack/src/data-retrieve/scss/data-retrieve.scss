@@ -1,0 +1,126 @@
+/* Style the admin page container */
+.data-retrieval-container {
+    max-width: 800px;
+    margin: 20px auto;
+    background-color: #fff;
+    padding: 20px;
+    box-shadow: 0 0 5px rgba(0, 0, 0, 0.2);
+    h2{
+        @apply text-2xl;
+    }
+
+    h3{
+        @apply text-xl;
+    }
+    /* Style headings */
+    h2, h3 {
+        color: #333;
+        @apply my-8;
+    }
+
+    /* Style form elements */
+    label {
+        font-weight: bold;
+    }
+
+    input[type="text"],
+    input[type="date"],
+ 
+    input[type="submit"] {
+        display: block;
+        width: 100%;
+        margin: 5px 0;
+        padding: 5px;
+    }
+
+    input[type="submit"] {
+        background-color: #0073e6;
+        color: #fff;
+        border: none;
+        padding: 10px 20px;
+        cursor: pointer;
+        border-radius: 5px;
+
+        @apply my-8;
+        &:hover {
+            background-color: #0051a0;
+        }
+    }
+}
+
+
+/* Add your SCSS styles here */
+.notification {
+    border: 1px solid #ccc;
+    margin: 10px;
+    padding: 10px;
+    border-radius: 5px;
+}
+
+.notification h3 {
+    margin: 0;
+}
+
+.meta-accordion, .taxonomy-accordion {
+    display: none;
+    padding: 10px;
+
+    &.active {
+        display: block;
+    }
+}
+
+
+/* Notification card styles */
+.data-retrival-plugin .notification {
+    border: 1px solid #e0e0e0;
+    background-color: #fff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    margin: 20px;
+    padding: 16px;
+    max-width: 350px;
+}
+
+.data-retrival-plugin .notification h3 {
+ 
+    color: #333;
+}
+
+.data-retrival-plugin .notification h4 {
+    font-size: 18px;
+    color: #777;
+    margin-top: 8px;
+}
+
+/* Accordion styles */
+.data-retrival-plugin .accordion {
+    background-color: #f7f7f7;
+    border: none;
+    color: #333;
+    cursor: pointer;
+    padding: 12px;
+    width: 100%;
+    text-align: left;
+    border-top: 1px solid #e0e0e0;
+}
+
+.data-retrival-plugin .accordion:hover {
+    background-color: #e0e0e0;
+}
+
+.data-retrival-plugin .accordion.active {
+    background-color: #f0f0f0;
+}
+
+.data-retrival-plugin .panel {
+    display: none;
+    padding: 16px;
+}
+
+
+.data-retrival-plugin.grid{
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+}
