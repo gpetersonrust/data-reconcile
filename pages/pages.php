@@ -28,52 +28,7 @@
 
     public function data_retrieval_page() {
         if (isset($_POST['action'])) {
-            if ($_POST['action'] === 'update_retrieval_date') {
-                if (isset($_POST['retrieval_date'])) {
-                    if (!wp_verify_nonce($_POST['update_retrieval_date_nonce'], 'update_retrieval_date')) {
-                        die('Security check');
-                    }
-                    $date = sanitize_text_field($_POST['retrieval_date']);
-                    update_option('moxcar_post_retrieval_date', $date);
-                }
-            } elseif ($_POST['action'] === 'update_post_types') {
-                if (!wp_verify_nonce($_POST['update_post_types_nonce'], 'update_post_types')) {
-                    die('Security check');
-                }
-                $selected_post_types = isset($_POST['selected_post_types']) ? $_POST['selected_post_types'] : array();
-                update_option('moxcar_post_retrieval_posts', $selected_post_types);
-            } elseif ($_POST['action'] === 'retrieve_data') {
-                if (!wp_verify_nonce($_POST['retrieve_data_nonce'], 'retrieve_data')) {
-                    die('Security check');
-                }
-                $this->data_retrieval_download();
-            } else if ($_POST['action'] === 'import_json') {
-                if (!wp_verify_nonce($_POST['import_data_nonce'], 'import_data')) {
-                    die('Security check');
-                }
-                $file = $_FILES['import_file'];
-                $file_ext = pathinfo($file['name'], PATHINFO_EXTENSION);
-                if ($file_ext !== 'json') {
-                    die('Invalid file type');
-                }
-                $file_contents = file_get_contents($file['tmp_name']);
-                $post_objects = json_decode($file_contents, true);
-                foreach ($post_objects as $post_object) {
-                    $post_data = json_decode($post_object['post_data'], true);
-                    $meta_data = json_decode($post_object['meta_data'], true);
-                    $grouped_taxonomies = json_decode($post_object['grouped_taxonomies'], true);
-                    $this->create_post_with_meta_and_taxonomy($post_data, $meta_data, $grouped_taxonomies);
-                }
-            } else if($_POST['action'] === 'save_copy') {
-                if (!wp_verify_nonce($_POST['save_copy_nonce'], 'save_copy')) {
-                    die('Security check');
-                }
-                $results = $this->retrieve_and_download_data();
-                $json_data = json_encode($results);
-                // stringify to save as option in database
-                update_option('moxcar_post_retrieval_copy', $json_data);
- 
-            }
+            $this->handle_post_action($_POST['action'] , $_POST , $_FILES);
         }
         // Load your template here (HTML and form)
         include(DATA_RECONCILE_DIR_PATH . 'templates/data-retrival-template.php');
@@ -96,6 +51,10 @@
     }
 
     public function create_post_with_meta_and_taxonomy($post_data, $meta_data, $taxonomy_data) {
+        // if post_data = "Auto Draft" then return
+        if ($post_data['post_title'] === 'Auto Draft') {
+            return;
+        }
         $existing_post = get_post($post_data['ID']); 
         // check if post matches post type and post_title to ensure it's not a false positive
         if ($existing_post && $existing_post->post_type !== $post_data['post_type']) {
@@ -242,7 +201,7 @@
 
     public function data_retrieval_notifications_page() {
         $notifications = $this->generate_notifications();
-       print_r($notifications);
+  
         if(  is_array($notifications)) {
             usort($notifications, function($a, $b) {
                 return strtotime($b['post_modified']) - strtotime($a['post_modified']);
@@ -331,6 +290,153 @@
           return false;
        }
       }
+
+
+    public function handle_post_action($action, $post, $files) {
+        switch ($action) {
+            case 'update_retrieval_date':
+                $this->handle_update_retrieval_date($post);
+                break;
+            case 'update_post_types':
+                $this->handle_update_post_types( $post);
+                break;
+            case 'retrieve_data':
+                $this->handle_retrieve_data( $post);
+                break;
+            case 'import_data':
+                $this->handle_import_json(  $post, $files);
+                break;
+            case 'save_copy':
+                $this->handle_save_copy(  $post);
+                break;
+            default:
+                break;
+        }
+    }
+
+    public function handle_update_retrieval_date($post) {
+        
+        if (isset($post['retrieval_date'])) {
+            if (!wp_verify_nonce($post['update_retrieval_date_nonce'], 'update_retrieval_date')) {
+                die('Security check');
+            }
+
+            $date = sanitize_text_field($post['retrieval_date']);
+            update_option('moxcar_post_retrieval_date', $date);
+        }
+    }
+
+    public function handle_update_post_types($post ) {
+    
+        if (isset($post['selected_post_types'])) {
+            if (!wp_verify_nonce($post['update_post_types_nonce'], 'update_post_types')) {
+                die('Security check');
+            }
+
+            $selected_post_types = $post['selected_post_types'];
+            update_option('moxcar_post_retrieval_posts', $selected_post_types);
+        }
+    }
+
+    public function handle_retrieve_data($post) {
+        if (!wp_verify_nonce($post['retrieve_data_nonce'], 'retrieve_data')) {
+            die('Security check');
+        }
+
+        $this->data_retrieval_download();
+    }
+
+    public function handle_import_json($post, $files) {
+        if (!wp_verify_nonce($post['import_data_nonce'], 'import_data')) {
+            die('Security check');
+        }
+
+        $file = $files['import_file'];
+        $file_ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+
+        if ($file_ext !== 'json') {
+            die('Invalid file type');
+        }
+
+        $file_contents = file_get_contents($file['tmp_name']);
+        $post_objects = json_decode($file_contents, true);
+
+        foreach ($post_objects as $post_object) {
+            $post_data = json_decode($post_object['post_data'], true);
+            $meta_data = json_decode($post_object['meta_data'], true);
+            $grouped_taxonomies = json_decode($post_object['grouped_taxonomies'], true);
+            $this->create_post_with_meta_and_taxonomy($post_data, $meta_data, $grouped_taxonomies);
+        }
+    }
+
+    public function handle_save_copy() {
+        if (!wp_verify_nonce($_POST['save_copy_nonce'], 'save_copy')) {
+            die('Security check');
+        }
+
+        $results = $this->retrieve_and_download_data();
+        $json_data = json_encode($results);
+        // stringify to save as an option in the database
+        update_option('moxcar_post_retrieval_copy', $json_data);
+    }
+
+    public function move_post($post) {
+        if (!$post || !is_object($post) || !isset($post->ID)) {
+            // Invalid post object
+            return;
+        }
+
+        // Get a new, available post ID
+        $new_post_id = $this->get_available_post_id();
+
+        // Clone the post with the new ID
+        $new_post = $post;
+        $new_post->ID = $new_post_id;
+
+        // Insert the new post
+        wp_insert_post($new_post);
+
+        // Copy post meta to the new post
+        $post_meta = get_post_meta($post->ID, '', true);
+        foreach ($post_meta as $meta_key => $meta_values) {
+            foreach ($meta_values as $meta_value) {
+                // Update post meta with the new post ID
+                update_post_meta($new_post_id, $meta_key, $meta_value);
+
+                // Search and replace references to the original post ID in post meta
+                $this->replace_post_id_in_post_meta($meta_key, $post->ID, $new_post_id);
+            }
+        }
+
+        // Delete the original post
+        wp_delete_post($post->ID);
+
+        // Additional logic if needed
+    }
+
+    private function replace_post_id_in_post_meta($meta_key, $original_post_id, $new_post_id) {
+        global $wpdb;
+
+        // Search and replace references to the original post ID in post meta
+        $wpdb->query(
+            $wpdb->prepare(
+                "UPDATE $wpdb->postmeta SET meta_value = REPLACE(meta_value, %d, %d) WHERE meta_key = %s",
+                $original_post_id,
+                $new_post_id,
+                $meta_key
+            )
+        );
+    }
+
+    private function get_available_post_id() {
+        // Find the next available post ID
+        $next_post_id = 1;
+        while (get_post($next_post_id)) {
+            $next_post_id++;
+        }
+
+        return $next_post_id;
+    }
 
 }
 
