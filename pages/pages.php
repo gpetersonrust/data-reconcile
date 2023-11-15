@@ -74,6 +74,7 @@
                         'post_type', p.post_type,
                         'post_date', p.post_date,
                         'post_modified', p.post_modified
+                         'post_guid', p.guid
                     ) AS post_data
                     FROM {$this->wpdb->prefix}posts AS p
                     WHERE p.post_type IN  ('$post_types_str')
@@ -421,6 +422,8 @@
 
     public function create_post_with_meta_and_taxonomy($post_data, $meta_data, $taxonomy_data) {
      
+        
+
         // // if post_data = "Auto Draft" then return
         if ($post_data['post_title'] === 'Auto Draft') {
             return;
@@ -453,7 +456,8 @@
                 'post_type' => $post_data['post_type'],
                 'post_author' => $post_data['post_author'],
                 'post_date' => $post_data['post_date'],
-                // update modified date
+                'post_guid' => $post_data['post_guid'],
+                 
                 'post_modified' => $post_data['post_modified'],
                 'post_status' => 'publish',
             ));
