@@ -73,7 +73,7 @@
                         'post_content', p.post_content,
                         'post_type', p.post_type,
                         'post_date', p.post_date,
-                        'post_modified', p.post_modified
+                        'post_modified', p.post_modified,
                          'post_guid', p.guid
                     ) AS post_data
                     FROM {$this->wpdb->prefix}posts AS p
