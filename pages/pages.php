@@ -50,128 +50,76 @@
         }
     }
 
-    public function create_post_with_meta_and_taxonomy($post_data, $meta_data, $taxonomy_data) {
-        // if post_data = "Auto Draft" then return
-        if ($post_data['post_title'] === 'Auto Draft') {
-            return;
-        }
-        $existing_post = get_post($post_data['ID']); 
-        // check if post matches post type and post_title to ensure it's not a false positive
-        if ($existing_post && $existing_post->post_type !== $post_data['post_type']) {
-            $existing_post = null;
-        }
+   
+    public function retrieve_and_download_data() {
 
-        if($existing_post && $existing_post->post_title !== $post_data['post_title']) {
-            $existing_post = null;
-        }
-        if ($existing_post) {
-            $post_id = $existing_post->ID;
-            // update post
-            wp_update_post(array(
-                'ID' => $post_id,
-                'post_title' => $post_data['post_title'],
-                'post_content' => $post_data['post_content'],
-                'post_type' => $post_data['post_type'],
-                'post_author' => $post_data['post_author'],
-                'post_date' => $post_data['post_date'],
-                // update modified date
-                'post_modified' => $post_data['post_modified'],
-                'post_status' => 'publish',
-            ));
-        } else {
-            $post_id = wp_insert_post(array(
-                'post_title' => $post_data['post_title'],
-                'post_content' => $post_data['post_content'],
-                'post_type' => $post_data['post_type'],
-                'post_author' => $post_data['post_author'],
-                'post_date' => $post_data['post_date'],
-                'post_status' => 'publish',
-            ));
-        }
-        foreach ($meta_data as $meta_key => $meta_value) {
-            update_post_meta($post_id, $meta_key, $meta_value);
-        }
-        foreach ($taxonomy_data as $taxonomy_item) {
-            $term_name = $taxonomy_item['name'];
-            $taxonomy = $taxonomy_item['taxonomy'];
-            $term = term_exists($term_name, $taxonomy);
-            if (!$term) {
-                $term = wp_insert_term($term_name, $taxonomy);
-            }
-            if (!is_wp_error($term)) {
-                wp_set_post_terms($post_id, $term['term_id'], $taxonomy);
-            }
-        }
-        return $post_id;
-    }
-
-    public function retrieve_and_download_data( ) {
-      
         $date = get_option('moxcar_post_retrieval_date');
         $post_types = get_option('moxcar_post_retrieval_posts', array());
-        
+    
         $post_types_str = implode("','", $post_types);
         $post_type_placeholders = array_fill(0, count($post_types), '%s');
         $post_type_placeholders = implode(', ', $post_type_placeholders);
-        
+    
         $query_args = array_merge($post_types, array($date));
         $in_clause = '(' . $post_type_placeholders . ')';
-        
+    
         $query = $this->wpdb->prepare(
             "SELECT post_data.post_data, meta_data.meta_data, grouped_taxonomies.grouped_taxonomies
-            FROM (
-                SELECT p.ID, JSON_OBJECT(
-                    'ID', p.ID,
-                    'post_title', p.post_title,
-                    'post_author', p.post_author,
-                    'post_content', p.post_content,
-                    'post_type', p.post_type,
-                    'post_date', p.post_date,
-                    'post_modified', p.post_modified
+                FROM (
+                    SELECT p.ID, JSON_OBJECT(
+                        'ID', p.ID,
+                        'post_title', p.post_title,
+                        'post_author', p.post_author,
+                        'post_content', p.post_content,
+                        'post_type', p.post_type,
+                        'post_date', p.post_date,
+                        'post_modified', p.post_modified
+                    ) AS post_data
+                    FROM {$this->wpdb->prefix}posts AS p
+                    WHERE p.post_type IN  ('$post_types_str')
+                    AND  p.post_modified > %s
+                    AND  p.post_title != 'Auto Draft'  -- Add this condition to exclude 'Auto Draft'
                 ) AS post_data
-                FROM {$this->wpdb->prefix}posts AS p
-                WHERE p.post_type IN  ('$post_types_str')
-                AND  p.post_modified > %s
-            ) AS post_data
-            LEFT JOIN (
-                SELECT pm.post_id, JSON_OBJECTAGG(
-                    CASE WHEN pm.meta_key IS NOT NULL THEN pm.meta_key ELSE 'undefined' END, pm.meta_value
-                ) AS meta_data
-                FROM {$this->wpdb->prefix}postmeta AS pm
-                GROUP BY pm.post_id
-            ) AS meta_data ON post_data.ID = meta_data.post_id
-            LEFT JOIN (
-                SELECT p.ID, JSON_ARRAYAGG(
-                    JSON_OBJECT('taxonomy', tt.taxonomy, 'name', t.name)
-                ) AS grouped_taxonomies
-                FROM {$this->wpdb->prefix}posts AS p
-                LEFT JOIN {$this->wpdb->prefix}term_relationships AS tr ON p.ID = tr.object_id
-                LEFT JOIN {$this->wpdb->prefix}term_taxonomy AS tt ON tr.term_taxonomy_id = tt.term_taxonomy_id
-                LEFT JOIN {$this->wpdb->prefix}terms AS t ON tt.term_id = t.term_id
-                WHERE p.post_type IN  ('$post_types_str')
-                GROUP BY p.ID
-            ) AS grouped_taxonomies ON post_data.ID = grouped_taxonomies.ID",
+                LEFT JOIN (
+                    SELECT pm.post_id, JSON_OBJECTAGG(
+                        CASE WHEN pm.meta_key IS NOT NULL THEN pm.meta_key ELSE 'undefined' END, pm.meta_value
+                    ) AS meta_data
+                    FROM {$this->wpdb->prefix}postmeta AS pm
+                    GROUP BY pm.post_id
+                ) AS meta_data ON post_data.ID = meta_data.post_id
+                LEFT JOIN (
+                    SELECT p.ID, JSON_ARRAYAGG(
+                        JSON_OBJECT('taxonomy', tt.taxonomy, 'name', t.name)
+                    ) AS grouped_taxonomies
+                    FROM {$this->wpdb->prefix}posts AS p
+                    LEFT JOIN {$this->wpdb->prefix}term_relationships AS tr ON p.ID = tr.object_id
+                    LEFT JOIN {$this->wpdb->prefix}term_taxonomy AS tt ON tr.term_taxonomy_id = tt.term_taxonomy_id
+                    LEFT JOIN {$this->wpdb->prefix}terms AS t ON tt.term_id = t.term_id
+                    WHERE p.post_type IN  ('$post_types_str')
+                    GROUP BY p.ID
+                ) AS grouped_taxonomies ON post_data.ID = grouped_taxonomies.ID",
             $date
         );
-
+    
         $results = $this->wpdb->get_results($query, ARRAY_A);
-
+    
         return $results;
     }
-
+    
     public function generate_notifications() {
         $results = $this->retrieve_and_download_data();
-
-        
+       
     
         // Iterate through the retrieved data and generate notifications
         $notifications = array();
         // get saved copies from database
         $saved_copies = get_option('moxcar_post_retrieval_copy');
         $saved_copies = json_decode($saved_copies, true);
+      
      if(!$saved_copies) {
         return "No saved copies found please save a copy first!";
      }
+    
    
     
         foreach ($results as $row) {
@@ -267,7 +215,7 @@
           foreach ($saved_copy_grouped_taxonomies as $key => $value) {
               $saved_copy_value = $saved_copy_grouped_taxonomies[$key];
                  $check_against_copy_value = $check_against_copy_grouped_taxonomies[$key];
-                 print_r($check_against_copy_value);
+                 
                  if($saved_copy_value != $check_against_copy_value) {
                      $anything_changed = true;
                      $notification_array['grouped_taxonomies'][$key] = $value;
@@ -303,7 +251,7 @@
             case 'retrieve_data':
                 $this->handle_retrieve_data( $post);
                 break;
-            case 'import_data':
+            case 'import_json':
                 $this->handle_import_json(  $post, $files);
                 break;
             case 'save_copy':
@@ -347,6 +295,8 @@
     }
 
     public function handle_import_json($post, $files) {
+      
+       
         if (!wp_verify_nonce($post['import_data_nonce'], 'import_data')) {
             die('Security check');
         }
@@ -360,13 +310,29 @@
 
         $file_contents = file_get_contents($file['tmp_name']);
         $post_objects = json_decode($file_contents, true);
-
+   
+ 
         foreach ($post_objects as $post_object) {
+            
+         
             $post_data = json_decode($post_object['post_data'], true);
             $meta_data = json_decode($post_object['meta_data'], true);
+            //if meta data is empty set to empty array
+            if(!$meta_data) {
+                $meta_data = array();
+            }
+
+          
             $grouped_taxonomies = json_decode($post_object['grouped_taxonomies'], true);
+            //if taxonomies are empty set to empty array
+            if(!$grouped_taxonomies) {
+                $grouped_taxonomies = array();
+            }
+
+             
             $this->create_post_with_meta_and_taxonomy($post_data, $meta_data, $grouped_taxonomies);
         }
+     
     }
 
     public function handle_save_copy() {
@@ -380,21 +346,31 @@
         update_option('moxcar_post_retrieval_copy', $json_data);
     }
 
-    public function move_post($post) {
+    public function move_post($post, $post_id) {
+       
         if (!$post || !is_object($post) || !isset($post->ID)) {
             // Invalid post object
             return;
         }
 
         // Get a new, available post ID
-        $new_post_id = $this->get_available_post_id();
+        $new_post_id = $this->get_available_post_id( $post_id );
+
+       
 
         // Clone the post with the new ID
-        $new_post = $post;
-        $new_post->ID = $new_post_id;
-
-        // Insert the new post
-        wp_insert_post($new_post);
+        $new_post =  [
+            
+            'post_title' => $post->post_title,
+            'post_content' => $post->post_content,
+            'post_type' => $post->post_type,
+            'post_author' => $post->post_author,
+            'post_date' => $post->post_date,
+            'post_status' => $post->post_status,
+        ];
+      
+        $new_post_id = wp_insert_post($new_post);
+ 
 
         // Copy post meta to the new post
         $post_meta = get_post_meta($post->ID, '', true);
@@ -407,6 +383,20 @@
                 $this->replace_post_id_in_post_meta($meta_key, $post->ID, $new_post_id);
             }
         }
+
+        // Copy taxonomies to the new post
+        $taxonomies = get_object_taxonomies($post->post_type);
+        foreach ($taxonomies as $taxonomy) {
+            $terms = get_the_terms($post->ID, $taxonomy);
+            if ($terms) {
+                $term_ids = array();
+                foreach ($terms as $term) {
+                    $term_ids[] = $term->term_id;
+                }
+                wp_set_object_terms($new_post_id, $term_ids, $taxonomy);
+            }
+        }
+
 
         // Delete the original post
         wp_delete_post($post->ID);
@@ -428,9 +418,85 @@
         );
     }
 
-    private function get_available_post_id() {
+
+    public function create_post_with_meta_and_taxonomy($post_data, $meta_data, $taxonomy_data) {
+     
+        // // if post_data = "Auto Draft" then return
+        if ($post_data['post_title'] === 'Auto Draft') {
+            return;
+        }
+        $post_to_move = null;
+        $existing_post = get_post($post_data['ID']); 
+
+         
+
+          if($existing_post):
+        // check if post matches post type and post_title to ensure it's not a false positive
+        if ($existing_post && $existing_post->post_type !== $post_data['post_type'] || $existing_post->post_title !== $post_data['post_title']) {
+
+            
+              $post_to_move = $existing_post;
+              $post_id = $existing_post->ID;
+                $this->move_post($post_to_move, $post_id);
+                 $existing_post = null;
+
+        }
+
+    endif;
+        if ($existing_post) {
+            $post_id = $existing_post->ID;
+            // update post
+            wp_update_post(array(
+                'ID' => $post_id,
+                'post_title' => $post_data['post_title'],
+                'post_content' => $post_data['post_content'],
+                'post_type' => $post_data['post_type'],
+                'post_author' => $post_data['post_author'],
+                'post_date' => $post_data['post_date'],
+                // update modified date
+                'post_modified' => $post_data['post_modified'],
+                'post_status' => 'publish',
+            ));
+        } else {
+
+            $prepared_query = $this->wpdb->prepare(
+                "INSERT INTO {$this->wpdb->prefix}posts 
+                (ID, post_title, post_content, post_type, post_author, post_date, post_status) 
+                VALUES (%d, %s, %s, %s, %d, %s, %s)",
+                $post_data['ID'],
+                $post_data['post_title'],
+                $post_data['post_content'],
+                $post_data['post_type'],
+                $post_data['post_author'],
+                $post_data['post_date'],
+                'publish'
+            );
+            
+            $this->wpdb->query($prepared_query);
+             $post_id = $this->wpdb->insert_id;            
+             
+        }
+        foreach ($meta_data as $meta_key => $meta_value) {
+            update_post_meta($post_id, $meta_key, $meta_value);
+        }
+        foreach ($taxonomy_data as $taxonomy_item) {
+            $term_name = $taxonomy_item['name'];
+            $taxonomy = $taxonomy_item['taxonomy'];
+            $term = term_exists($term_name, $taxonomy);
+            if (!$term) {
+                $term = wp_insert_term($term_name, $taxonomy);
+            }
+            if (!is_wp_error($term)) {
+                wp_set_post_terms($post_id, $term['term_id'], $taxonomy, true);
+              
+            }
+        }
+        return $post_id;
+    }
+
+    private function get_available_post_id($post_id) {
         // Find the next available post ID
-        $next_post_id = 1;
+        $next_post_id = $post_id;
         while (get_post($next_post_id)) {
             $next_post_id++;
         }
