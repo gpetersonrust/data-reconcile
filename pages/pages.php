@@ -3,6 +3,7 @@
     public function __construct() {
         add_action('admin_menu', array($this, 'add_admin_page'));
         $this->wpdb = $GLOBALS['wpdb'];
+        $this->meta_conversions = array();
     }
 
     public function add_admin_page() {
@@ -317,7 +318,7 @@
           
         $media_attachments = array();
         $posts_data = array();
-        // loop thru post objects and if post type is attachment add to media attachments array else add to post data array
+  // loop thru post objects and if post type is attachment add to media attachments array else add to post data array
         foreach ($post_objects as $post_object) {
             if ($post_object['post_type'] === 'attachment') {
                 $media_attachments[] = $post_object;
@@ -326,21 +327,23 @@
             }
         }
 
+        // sort posts_data by IDs
+        
+        usort($posts_data, function($a, $b) {
+            return $a['ID'] - $b['ID'];
+        });
 
-        // loop thru media attachments and create media attachments
-        foreach ($media_attachments as $media_attachment) {
-            $meta_data = json_decode($media_attachment['meta_data'], true);
-            //if meta data is empty set to empty array
-            if(!$meta_data) {
-                $meta_data = array();
-            }
-            $this->create_post_with_meta_and_taxonomy($media_attachment,$meta_data    , array());
+        
+
+       
+        // loop thru media attachments and process each one
+        foreach ($media_attachments as $single_media_attachment) {
+            $this->process_single_media_attachment($single_media_attachment);
         }
-
-          
+ 
    
  
-        foreach ($post_objects as $post_object) {
+        foreach ($post_data as $post_object) {
             
          
             $post_data = json_decode($post_object['post_data'], true);
@@ -495,30 +498,27 @@
         } else {
 
       
-
-            $prepared_query = $this->wpdb->prepare(
-                "INSERT INTO {$this->wpdb->prefix}posts 
-                (ID, post_title, post_content, post_type, post_author, post_date, post_status, guid) 
-                VALUES (%d, %s, %s, %s, %d, %s, %s, %s)",
-                $post_data['ID'],
-                $post_data['post_title'],
-                $post_data['post_content'],
-                $post_data['post_type'],
-                $post_data['post_author'],
-                $post_data['post_date'],
-                'publish',
-                $post_data['post_guid']  // Add the guid value here
-            );
+            $post_id = wp_insert_post(array(
+                'ID' => $post_data['ID'],
+                'post_title' => $post_data['post_title'],
+                'post_content' => $post_data['post_content'],
+                'post_type' => $post_data['post_type'],
+                'post_author' => $post_data['post_author'],
+                'post_date' => $post_data['post_date'],
+               
+                'post_modified' => $post_data['post_modified'],
+                'post_status' => 'publish',
+            ));     
             
-            $this->wpdb->query($prepared_query);
-            $post_id = $this->wpdb->insert_id;
-            
-            
-            $this->wpdb->query($prepared_query);
-             $post_id = $this->wpdb->insert_id;            
+            $this->meta_conversions[$post_data['ID']] = $post_id;
              
         }
         foreach ($meta_data as $meta_key => $meta_value) {
+            // check if meta_value is in meta_conversions array
+            if(array_key_exists($meta_value, $this->meta_conversions)) {
+                $meta_value = $this->meta_conversions[$meta_value];
+            }
+           
             update_post_meta($post_id, $meta_key, $meta_value);
         }
         foreach ($taxonomy_data as $taxonomy_item) {
@@ -567,6 +567,90 @@
     
  
     }
+
+    public function download_and_add_image_to_library($image_url) {
+        // Get the contents of the image
+        $response = wp_remote_get($image_url);
+    
+        if (!is_wp_error($response) && $response['response']['code'] === 200) {
+            // Get the body of the response
+            $image_data = wp_remote_retrieve_body($response);
+    
+            // Generate a unique name for the image file
+            $image_filename = wp_unique_filename(wp_upload_dir()['path'], basename($image_url));
+    
+            // Save the image to the uploads directory
+            $image_file = wp_upload_bits($image_filename, null, $image_data);
+    
+            if (!$image_file['error']) {
+                // Prepare an array with the attachment details
+                $attachment = array(
+                    'post_title'     => sanitize_file_name(pathinfo($image_filename, PATHINFO_FILENAME)),
+                    'post_mime_type' => wp_check_filetype($image_filename)['type'],
+                    'post_status'    => 'inherit',
+                );
+    
+                // Insert the attachment into the media library
+                $attachment_id = wp_insert_attachment($attachment, $image_file['file']);
+    
+                // Generate metadata for the attachment
+                $attachment_data = wp_generate_attachment_metadata($attachment_id, $image_file['file']);
+                
+                // Update the attachment metadata
+                wp_update_attachment_metadata($attachment_id, $attachment_data);
+    
+                return $attachment_id; // Return the attachment ID for further use if needed
+            } else {
+                return 'Error uploading image: ' . $image_file['error'];
+            }
+        } else {
+            return 'Error fetching image: ' . $response->get_error_message();
+        }
+    }
+
+    public function process_single_media_attachment($single_media_attachment) {
+        $post_to_move = null;
+        $ID = $single_media_attachment['ID'];
+       
+        
+        $existing_post =  get_post($ID);
+
+         
+ 
+          if($existing_post):
+        // check if post matches post type and post_title to ensure it's not a false positive
+        if ($existing_post && $existing_post->post_type !== $single_media_attachment['post_type'] || $existing_post->post_title !== $single_media_attachment['post_title'] || $existing_post->guid !== $single_media_attachment['post_guid']) 
+        {
+            $post_to_move = $existing_post;
+            $post_id = $existing_post->ID;
+            $this->move_post($post_to_move, $post_id);
+            $existing_post = null;
+
+        }
+    endif;
+
+       
+
+
+
+
+        $single_post_data = json_decode($single_media_attachment['post_data'], true);
+        $single_meta_data = json_decode($single_media_attachment['meta_data'], true);
+        $guid = $single_post_data['post_guid'];
+       
+        // Use guid to insert media attachment
+        $meta_attachment_id = $this->download_and_add_image_to_library($guid);
+       $this->meta_conversions[$ID] = $meta_attachment_id;
+        
+    
+      
+       
+    
+        
+    
+       
+    }
+    
     
 
 }
