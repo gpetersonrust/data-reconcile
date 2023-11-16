@@ -64,45 +64,48 @@
         $in_clause = '(' . $post_type_placeholders . ')';
     
         $query = $this->wpdb->prepare(
-            "SELECT post_data.post_data, meta_data.meta_data, grouped_taxonomies.grouped_taxonomies
-                FROM (
-                    SELECT p.ID, JSON_OBJECT(
-                        'ID', p.ID,
-                        'post_title', p.post_title,
-                        'post_author', p.post_author,
-                        'post_content', p.post_content,
-                        'post_type', p.post_type,
-                        'post_date', p.post_date,
-                        'post_modified', p.post_modified,
-                         'post_guid', p.guid
-                    ) AS post_data
-                    FROM {$this->wpdb->prefix}posts AS p
-                    WHERE p.post_type IN  ('$post_types_str')
-                    AND  p.post_modified > %s
-                    AND  p.post_title != 'Auto Draft'  -- Add this condition to exclude 'Auto Draft'
+            "SELECT post_data.ID, post_data.post_type, post_data.post_data, meta_data.meta_data, grouped_taxonomies.grouped_taxonomies
+            FROM (
+                SELECT p.ID, p.post_type, JSON_OBJECT(
+                    'ID', p.ID,
+                    'post_title', p.post_title,
+                    'post_author', p.post_author,
+                    'post_content', p.post_content,
+                    'post_type', p.post_type,
+                    'post_date', p.post_date,
+                    'post_modified', p.post_modified,
+                    'post_guid', p.guid
                 ) AS post_data
-                LEFT JOIN (
-                    SELECT pm.post_id, JSON_OBJECTAGG(
-                        CASE WHEN pm.meta_key IS NOT NULL THEN pm.meta_key ELSE 'undefined' END, pm.meta_value
-                    ) AS meta_data
-                    FROM {$this->wpdb->prefix}postmeta AS pm
-                    GROUP BY pm.post_id
-                ) AS meta_data ON post_data.ID = meta_data.post_id
-                LEFT JOIN (
-                    SELECT p.ID, JSON_ARRAYAGG(
-                        JSON_OBJECT('taxonomy', tt.taxonomy, 'name', t.name)
-                    ) AS grouped_taxonomies
-                    FROM {$this->wpdb->prefix}posts AS p
-                    LEFT JOIN {$this->wpdb->prefix}term_relationships AS tr ON p.ID = tr.object_id
-                    LEFT JOIN {$this->wpdb->prefix}term_taxonomy AS tt ON tr.term_taxonomy_id = tt.term_taxonomy_id
-                    LEFT JOIN {$this->wpdb->prefix}terms AS t ON tt.term_id = t.term_id
-                    WHERE p.post_type IN  ('$post_types_str')
-                    GROUP BY p.ID
-                ) AS grouped_taxonomies ON post_data.ID = grouped_taxonomies.ID",
+                FROM {$this->wpdb->prefix}posts AS p
+                WHERE p.post_type IN ('$post_types_str')
+                AND p.post_modified > %s
+                AND p.post_title != 'Auto Draft'
+            ) AS post_data
+            LEFT JOIN (
+                SELECT pm.post_id, JSON_OBJECTAGG(
+                    CASE WHEN pm.meta_key IS NOT NULL THEN pm.meta_key ELSE 'undefined' END, pm.meta_value
+                ) AS meta_data
+                FROM {$this->wpdb->prefix}postmeta AS pm
+                GROUP BY pm.post_id
+            ) AS meta_data ON post_data.ID = meta_data.post_id
+            LEFT JOIN (
+                SELECT p.ID, JSON_ARRAYAGG(
+                    JSON_OBJECT('taxonomy', tt.taxonomy, 'name', t.name)
+                ) AS grouped_taxonomies
+                FROM {$this->wpdb->prefix}posts AS p
+                LEFT JOIN {$this->wpdb->prefix}term_relationships AS tr ON p.ID = tr.object_id
+                LEFT JOIN {$this->wpdb->prefix}term_taxonomy AS tt ON tr.term_taxonomy_id = tt.term_taxonomy_id
+                LEFT JOIN {$this->wpdb->prefix}terms AS t ON tt.term_id = t.term_id
+                WHERE p.post_type IN ('$post_types_str')
+                GROUP BY p.ID
+            ) AS grouped_taxonomies ON post_data.ID = grouped_taxonomies.ID
+            ORDER BY post_data.post_type ASC",  // Added ORDER BY clause
             $date
         );
-    
+        
         $results = $this->wpdb->get_results($query, ARRAY_A);
+
+        
     
         return $results;
     }
@@ -311,6 +314,30 @@
 
         $file_contents = file_get_contents($file['tmp_name']);
         $post_objects = json_decode($file_contents, true);
+          
+        $media_attachments = array();
+        $posts_data = array();
+        // loop thru post objects and if post type is attachment add to media attachments array else add to post data array
+        foreach ($post_objects as $post_object) {
+            if ($post_object['post_type'] === 'attachment') {
+                $media_attachments[] = $post_object;
+            } else {
+                $posts_data[] = $post_object;
+            }
+        }
+
+
+        // loop thru media attachments and create media attachments
+        foreach ($media_attachments as $media_attachment) {
+            $meta_data = json_decode($media_attachment['meta_data'], true);
+            //if meta data is empty set to empty array
+            if(!$meta_data) {
+                $meta_data = array();
+            }
+            $this->create_post_with_meta_and_taxonomy($media_attachment,$meta_data    , array());
+        }
+
+          
    
  
         foreach ($post_objects as $post_object) {
@@ -446,6 +473,10 @@
         }
 
     endif;
+     $replaced_guid = $this->replace_guid_with_site_url($post_data['post_guid']);
+
+ 
+     
         if ($existing_post) {
             $post_id = $existing_post->ID;
             // update post
@@ -463,18 +494,25 @@
             ));
         } else {
 
+      
+
             $prepared_query = $this->wpdb->prepare(
                 "INSERT INTO {$this->wpdb->prefix}posts 
-                (ID, post_title, post_content, post_type, post_author, post_date, post_status) 
-                VALUES (%d, %s, %s, %s, %d, %s, %s)",
+                (ID, post_title, post_content, post_type, post_author, post_date, post_status, guid) 
+                VALUES (%d, %s, %s, %s, %d, %s, %s, %s)",
                 $post_data['ID'],
                 $post_data['post_title'],
                 $post_data['post_content'],
                 $post_data['post_type'],
                 $post_data['post_author'],
                 $post_data['post_date'],
-                'publish'
+                'publish',
+                $post_data['post_guid']  // Add the guid value here
             );
+            
+            $this->wpdb->query($prepared_query);
+            $post_id = $this->wpdb->insert_id;
+            
             
             $this->wpdb->query($prepared_query);
              $post_id = $this->wpdb->insert_id;            
@@ -508,6 +546,29 @@
         return $next_post_id;
     }
 
+   public  function replace_guid_with_site_url($url) {
+   
+
+   
+
+    $pattern = '/^(https?:\/\/[^\/]+)(\/.*)?$/';
+
+    preg_match($pattern, $url, $matches);
+
+    $site_url = get_site_url();
+
+    if (isset($matches[1])) {
+        $base_url = $matches[1];
+        $path = isset($matches[2]) ? $matches[2] : '';
+        return $site_url . $path;
+    }
+
+    return null;
+    
+ 
+    }
+    
+
 }
 
 // Instantiate the DataReconcile class when the plugin is loaded
@@ -515,3 +576,4 @@ function data_reconcile_init() {
     $data_reconcile = new DataReconcile();
 }
 add_action('plugins_loaded', 'data_reconcile_init');
+?>
