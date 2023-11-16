@@ -3,7 +3,6 @@
     public function __construct() {
         add_action('admin_menu', array($this, 'add_admin_page'));
         $this->wpdb = $GLOBALS['wpdb'];
-        $this->meta_conversions = array();
     }
 
     public function add_admin_page() {
@@ -65,48 +64,44 @@
         $in_clause = '(' . $post_type_placeholders . ')';
     
         $query = $this->wpdb->prepare(
-            "SELECT post_data.ID, post_data.post_type, post_data.post_data, meta_data.meta_data, grouped_taxonomies.grouped_taxonomies
-            FROM (
-                SELECT p.ID, p.post_type, JSON_OBJECT(
-                    'ID', p.ID,
-                    'post_title', p.post_title,
-                    'post_author', p.post_author,
-                    'post_content', p.post_content,
-                    'post_type', p.post_type,
-                    'post_date', p.post_date,
-                    'post_modified', p.post_modified,
-                    'post_guid', p.guid
+            "SELECT post_data.post_data, meta_data.meta_data, grouped_taxonomies.grouped_taxonomies
+                FROM (
+                    SELECT p.ID, JSON_OBJECT(
+                        'ID', p.ID,
+                        'post_title', p.post_title,
+                        'post_author', p.post_author,
+                        'post_content', p.post_content,
+                        'post_type', p.post_type,
+                        'post_date', p.post_date,
+                        'post_modified', p.post_modified
+                    ) AS post_data
+                    FROM {$this->wpdb->prefix}posts AS p
+                    WHERE p.post_type IN  ('$post_types_str')
+                    AND  p.post_modified > %s
+                    AND  p.post_title != 'Auto Draft'  -- Add this condition to exclude 'Auto Draft'
                 ) AS post_data
-                FROM {$this->wpdb->prefix}posts AS p
-                WHERE p.post_type IN ('$post_types_str')
-                AND p.post_modified > %s
-                AND p.post_title != 'Auto Draft'
-            ) AS post_data
-            LEFT JOIN (
-                SELECT pm.post_id, JSON_OBJECTAGG(
-                    CASE WHEN pm.meta_key IS NOT NULL THEN pm.meta_key ELSE 'undefined' END, pm.meta_value
-                ) AS meta_data
-                FROM {$this->wpdb->prefix}postmeta AS pm
-                GROUP BY pm.post_id
-            ) AS meta_data ON post_data.ID = meta_data.post_id
-            LEFT JOIN (
-                SELECT p.ID, JSON_ARRAYAGG(
-                    JSON_OBJECT('taxonomy', tt.taxonomy, 'name', t.name)
-                ) AS grouped_taxonomies
-                FROM {$this->wpdb->prefix}posts AS p
-                LEFT JOIN {$this->wpdb->prefix}term_relationships AS tr ON p.ID = tr.object_id
-                LEFT JOIN {$this->wpdb->prefix}term_taxonomy AS tt ON tr.term_taxonomy_id = tt.term_taxonomy_id
-                LEFT JOIN {$this->wpdb->prefix}terms AS t ON tt.term_id = t.term_id
-                WHERE p.post_type IN ('$post_types_str')
-                GROUP BY p.ID
-            ) AS grouped_taxonomies ON post_data.ID = grouped_taxonomies.ID
-            ORDER BY post_data.post_type ASC",  // Added ORDER BY clause
+                LEFT JOIN (
+                    SELECT pm.post_id, JSON_OBJECTAGG(
+                        CASE WHEN pm.meta_key IS NOT NULL THEN pm.meta_key ELSE 'undefined' END, pm.meta_value
+                    ) AS meta_data
+                    FROM {$this->wpdb->prefix}postmeta AS pm
+                    GROUP BY pm.post_id
+                ) AS meta_data ON post_data.ID = meta_data.post_id
+                LEFT JOIN (
+                    SELECT p.ID, JSON_ARRAYAGG(
+                        JSON_OBJECT('taxonomy', tt.taxonomy, 'name', t.name)
+                    ) AS grouped_taxonomies
+                    FROM {$this->wpdb->prefix}posts AS p
+                    LEFT JOIN {$this->wpdb->prefix}term_relationships AS tr ON p.ID = tr.object_id
+                    LEFT JOIN {$this->wpdb->prefix}term_taxonomy AS tt ON tr.term_taxonomy_id = tt.term_taxonomy_id
+                    LEFT JOIN {$this->wpdb->prefix}terms AS t ON tt.term_id = t.term_id
+                    WHERE p.post_type IN  ('$post_types_str')
+                    GROUP BY p.ID
+                ) AS grouped_taxonomies ON post_data.ID = grouped_taxonomies.ID",
             $date
         );
-        
+    
         $results = $this->wpdb->get_results($query, ARRAY_A);
-
-        
     
         return $results;
     }
@@ -315,37 +310,11 @@
 
         $file_contents = file_get_contents($file['tmp_name']);
         $post_objects = json_decode($file_contents, true);
-          
-        $media_attachments = array();
-        $posts_data = array();
-  // loop thru post objects and if post type is attachment add to media attachments array else add to post data array
-        foreach ($post_objects as $post_object) {
-            if ($post_object['post_type'] === 'attachment') {
-                $media_attachments[] = $post_object;
-            } else {
-                $posts_data[] = $post_object;
-            }
-        }
-
-        // sort posts_data by IDs
-        
-        usort($posts_data, function($a, $b) {
-            return $a['ID'] - $b['ID'];
-        });
-
-        
-
-       
-        // // loop thru media attachments and process each one
-        foreach ($media_attachments as $single_media_attachment) {
-            $this->process_single_media_attachment($single_media_attachment);
-        }
- 
    
-          
-        foreach ($posts_data as $post_object) {
+ 
+        foreach ($post_objects as $post_object) {
             
-       
+         
             $post_data = json_decode($post_object['post_data'], true);
             $meta_data = json_decode($post_object['meta_data'], true);
             //if meta data is empty set to empty array
@@ -452,23 +421,12 @@
 
     public function create_post_with_meta_and_taxonomy($post_data, $meta_data, $taxonomy_data) {
      
-        
-
         // // if post_data = "Auto Draft" then return
         if ($post_data['post_title'] === 'Auto Draft') {
             return;
         }
         $post_to_move = null;
-        $existing_post = get_post($post_data['ID']);
-        // check for existing post by post_type and post_title
-         if(!$existing_post):
-           
-        $existing_post = new WP_Query( array(
-            'post_type' => $post_data['post_type'],
-            'post_title' => $post_data['post_title'],
-        ) );
-        $existing_post = $existing_post->posts[0];
-        endif;
+        $existing_post = get_post($post_data['ID']); 
 
          
 
@@ -485,10 +443,6 @@
         }
 
     endif;
-     $replaced_guid = $this->replace_guid_with_site_url($post_data['post_guid']);
-
- 
-     
         if ($existing_post) {
             $post_id = $existing_post->ID;
             // update post
@@ -499,35 +453,30 @@
                 'post_type' => $post_data['post_type'],
                 'post_author' => $post_data['post_author'],
                 'post_date' => $post_data['post_date'],
-                'post_guid' => $post_data['post_guid'],
-                 
+                // update modified date
                 'post_modified' => $post_data['post_modified'],
                 'post_status' => 'publish',
             ));
         } else {
 
-      
-            $post_id = wp_insert_post(array(
-             
-                'post_title' => $post_data['post_title'],
-                'post_content' => $post_data['post_content'],
-                'post_type' => $post_data['post_type'],
-                'post_author' => $post_data['post_author'],
-                'post_date' => $post_data['post_date'],
-               
-                'post_modified' => $post_data['post_modified'],
-                'post_status' => 'publish',
-            ));     
+            $prepared_query = $this->wpdb->prepare(
+                "INSERT INTO {$this->wpdb->prefix}posts 
+                (ID, post_title, post_content, post_type, post_author, post_date, post_status) 
+                VALUES (%d, %s, %s, %s, %d, %s, %s)",
+                $post_data['ID'],
+                $post_data['post_title'],
+                $post_data['post_content'],
+                $post_data['post_type'],
+                $post_data['post_author'],
+                $post_data['post_date'],
+                'publish'
+            );
             
-            $this->meta_conversions[$post_data['ID']] = $post_id;
+            $this->wpdb->query($prepared_query);
+             $post_id = $this->wpdb->insert_id;            
              
         }
         foreach ($meta_data as $meta_key => $meta_value) {
-            // check if meta_value is in meta_conversions array
-            if(array_key_exists($meta_value, $this->meta_conversions)) {
-                $meta_value = $this->meta_conversions[$meta_value];
-            }
-           
             update_post_meta($post_id, $meta_key, $meta_value);
         }
         foreach ($taxonomy_data as $taxonomy_item) {
@@ -542,8 +491,6 @@
               
             }
         }
-
-        echo 'Post ID: ' . $post_id . '<br>';
         return $post_id;
     }
 
@@ -557,113 +504,6 @@
         return $next_post_id;
     }
 
-   public  function replace_guid_with_site_url($url) {
-   
-
-   
-
-    $pattern = '/^(https?:\/\/[^\/]+)(\/.*)?$/';
-
-    preg_match($pattern, $url, $matches);
-
-    $site_url = get_site_url();
-
-    if (isset($matches[1])) {
-        $base_url = $matches[1];
-        $path = isset($matches[2]) ? $matches[2] : '';
-        return $site_url . $path;
-    }
-
-    return null;
-    
- 
-    }
-
-    public function download_and_add_image_to_library($image_url) {
-        // Get the contents of the image
-        $response = wp_remote_get($image_url);
-    
-        if (!is_wp_error($response) && $response['response']['code'] === 200) {
-            // Get the body of the response
-            $image_data = wp_remote_retrieve_body($response);
-    
-            // Generate a unique name for the image file
-            $image_filename = wp_unique_filename(wp_upload_dir()['path'], basename($image_url));
-    
-            // Save the image to the uploads directory
-            $image_file = wp_upload_bits($image_filename, null, $image_data);
-    
-            if (!$image_file['error']) {
-                // Prepare an array with the attachment details
-                $attachment = array(
-                    'post_title'     => sanitize_file_name(pathinfo($image_filename, PATHINFO_FILENAME)),
-                    'post_mime_type' => wp_check_filetype($image_filename)['type'],
-                    'post_status'    => 'inherit',
-                );
-    
-                // Insert the attachment into the media library
-                $attachment_id = wp_insert_attachment($attachment, $image_file['file']);
-    
-                // Generate metadata for the attachment
-                $attachment_data = wp_generate_attachment_metadata($attachment_id, $image_file['file']);
-                
-                // Update the attachment metadata
-                wp_update_attachment_metadata($attachment_id, $attachment_data);
-    
-                return $attachment_id; // Return the attachment ID for further use if needed
-            } else {
-                return 'Error uploading image: ' . $image_file['error'];
-            }
-        } else {
-            return 'Error fetching image: ' . $response->get_error_message();
-        }
-    }
-
-    public function process_single_media_attachment($single_media_attachment) {
-        $post_to_move = null;
-        $ID = $single_media_attachment['ID'];
-       
-        
-        $existing_post =  get_post($ID);
-
-         
- 
-          if($existing_post):
-        // check if post matches post type and post_title to ensure it's not a false positive
-        if ($existing_post && $existing_post->post_type !== $single_media_attachment['post_type'] || $existing_post->post_title !== $single_media_attachment['post_title'] || $existing_post->guid !== $single_media_attachment['post_guid']) 
-        {
-            $post_to_move = $existing_post;
-            $post_id = $existing_post->ID;
-            $this->move_post($post_to_move, $post_id);
-            $existing_post = null;
-
-        }
-    endif;
-
-       
-
-
-
-
-        $single_post_data = json_decode($single_media_attachment['post_data'], true);
-        $single_meta_data = json_decode($single_media_attachment['meta_data'], true);
-        $guid = $single_post_data['post_guid'];
-       
-        // Use guid to insert media attachment
-        $meta_attachment_id = $this->download_and_add_image_to_library($guid);
-       $this->meta_conversions[$ID] = $meta_attachment_id;
-        
-    
-      
-       
-    
-    echo $id . " - " . $meta_attachment_id . "<br>";
-    
-       
-    }
-    
-    
-
 }
 
 // Instantiate the DataReconcile class when the plugin is loaded
@@ -671,4 +511,3 @@ function data_reconcile_init() {
     $data_reconcile = new DataReconcile();
 }
 add_action('plugins_loaded', 'data_reconcile_init');
-?>
