@@ -336,16 +336,16 @@
         
 
        
-        // loop thru media attachments and process each one
+        // // loop thru media attachments and process each one
         foreach ($media_attachments as $single_media_attachment) {
             $this->process_single_media_attachment($single_media_attachment);
         }
  
    
- 
-        foreach ($post_data as $post_object) {
+          
+        foreach ($posts_data as $post_object) {
             
-         
+       
             $post_data = json_decode($post_object['post_data'], true);
             $meta_data = json_decode($post_object['meta_data'], true);
             //if meta data is empty set to empty array
@@ -459,7 +459,16 @@
             return;
         }
         $post_to_move = null;
-        $existing_post = get_post($post_data['ID']); 
+        $existing_post = get_post($post_data['ID']);
+        // check for existing post by post_type and post_title
+         if(!$existing_post):
+           
+        $existing_post = new WP_Query( array(
+            'post_type' => $post_data['post_type'],
+            'post_title' => $post_data['post_title'],
+        ) );
+        $existing_post = $existing_post->posts[0];
+        endif;
 
          
 
@@ -499,7 +508,7 @@
 
       
             $post_id = wp_insert_post(array(
-                'ID' => $post_data['ID'],
+             
                 'post_title' => $post_data['post_title'],
                 'post_content' => $post_data['post_content'],
                 'post_type' => $post_data['post_type'],
@@ -533,6 +542,8 @@
               
             }
         }
+
+        echo 'Post ID: ' . $post_id . '<br>';
         return $post_id;
     }
 
@@ -646,7 +657,7 @@
       
        
     
-        
+    echo $id . " - " . $meta_attachment_id . "<br>";
     
        
     }
